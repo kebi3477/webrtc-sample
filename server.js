@@ -1,10 +1,15 @@
+require('dotenv').config();
+
 const express = require('express'); // express
 const http = require('http'); // HTTP 프로토콜 연결
+const https = require('https');
+const fs = require('fs');
 const socketIo = require('socket.io'); // 웹소켓
 
 const app = express(); // express를 생성
-const server = http.createServer(app); // HTTP 서버를 생성
+const server = getServer();
 const io = socketIo(server); // 소켓 생성
+const port = process.env.PORT ?? 3000;
 let clientCount;
 
 app.use('/public', express.static(__dirname + '/public')); // public 폴더 안 모든 파일은 접근 가능하게 설정
@@ -33,8 +38,8 @@ app.get('/count', (req, res) => {
     res.send({ clientCount });
 })
 
-server.listen(3000, () => { // 3000번 포트로 서버 열기
-    console.log('Server is running on port 3000');
+server.listen(port, () => { // 3000번 포트로 서버 열기
+    console.log(`Server is running on port ${port}`);
 });
 
 function sendClientSize(socket, roomId) {
@@ -43,5 +48,23 @@ function sendClientSize(socket, roomId) {
     if (room) {
         clientCount = room.size;
         socket.broadcast.to(roomId).emit('client-count', room.size);
+    }
+}
+
+function getServer() {
+    const isHTTPS = process.env.HTTPS === 'true';
+
+    if (isHTTPS) {
+        const privateKey  = fs.readFileSync(process.env.HTTPS_KEY, 'utf8');
+        const certificate = fs.readFileSync(process.env.HTTPS_CERT, 'utf8');
+        const ca = fs.readFileSync(process.env.HTTPS_CA, 'utf8');  // 인증서 체인 (필요한 경우)
+        const credentials = {
+            key: privateKey,
+            cert: certificate,
+            ca: ca
+        };
+        return https.createServer(credentials, app);
+    } else {
+        return http.createServer(app); // HTTP 서버를 생성
     }
 }
