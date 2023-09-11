@@ -31,6 +31,14 @@ io.on('connection', (socket) => { // 소켓 연결 될 경우
 
         sendClientSize(socket, roomId);
     });
+
+    socket.on('start-screen-share', (roomId, userId) => {
+        socket.broadcast.to(roomId).emit('user-started-screen-share', userId);
+    });
+
+    socket.on('stop-screen-share', (roomId, userId) => {
+        socket.broadcast.to(roomId).emit('user-stopped-screen-share', userId);
+    });
 });
 
 app.get('/', (req, res) => { // root 라우팅 설정

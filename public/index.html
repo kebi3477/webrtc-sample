@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -17,6 +17,11 @@
           height: 100%;
           object-fit: cover;
         }
+
+        #screen-share {
+          border: 1px solid red;
+          width: 80%;
+        }
         </style>
 </head>
 <body>
@@ -25,6 +30,10 @@
     <h1>WebRTC Camera Stream</h1>
     <p id="client-count">현재 방 인원 : </p>
     <div id="video-grid"></div>
+    <button id="share-screen-btn">화면 공유</button>
+    <div id="share-screen">
+      <video id="share-screen-video"></video>
+    </div>
     <script src="public/js/webrtc.js"></script>
 </body>
 </html>
