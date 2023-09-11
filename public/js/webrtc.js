@@ -9,9 +9,10 @@ myVideo.muted = true;
 myVideo.classList.add('myVideo')
 
 let peers = [];
+let myId = '';
 
 navigator.mediaDevices.getUserMedia({ // 브라우저 내 사용자 카메라, 오디오 허용
-    video: true,
+    video: { facingMode: 'user' },
     audio: true
 }).then(stream => { // 허용 완료 될 경우 Promise Callback
     addVideoStream(myVideo, stream); // 내 비디오 추가
@@ -32,6 +33,16 @@ navigator.mediaDevices.getUserMedia({ // 브라우저 내 사용자 카메라, �
     socket.on('user-connected', userId => { // 서버에서 user-connected 로 보낼 경우 응답
         connectToNewUser(userId, stream);
     });
+
+    fetch(`/users`)
+    .then(res => res.json())
+    .then(data => {
+        data.userIds.forEach(userId => {
+            if (userId !== myId) {  // 자신의 ID는 제외하고 연결
+                connectToNewUser(userId, stream);
+            }
+        });
+    });
 });
 
 socket.on('user-disconnected', userId => { // 서버에서 user-disconnected 로 보낼 경우 응답
@@ -49,6 +60,8 @@ socket.on('client-count', clientCount => {
 });
 
 myPeer.on('open', id => { // Peerjs 생성 됐을 경우
+    myId = id;
+    myVideo.id = id;
     socket.emit('join-room', ROOM_ID, id); // join-room 이라는 키로 ROOM_ID, id 전송
 });
 

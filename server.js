@@ -11,6 +11,7 @@ const server = getServer();
 const io = socketIo(server); // 소켓 생성
 const port = process.env.PORT ?? 3000;
 let clientCount;
+let userIds = [];
 
 app.use('/public', express.static(__dirname + '/public')); // public 폴더 안 모든 파일은 접근 가능하게 설정
 
@@ -19,11 +20,13 @@ io.on('connection', (socket) => { // 소켓 연결 될 경우
         console.log(`새로운 사용자 접속! room : ${roomId} , userId : ${userId}`); 
         socket.join(roomId); // 소켓 roomId로 방 접속
         socket.broadcast.to(roomId).emit('user-connected', userId); //user-connected 라는 키로 userId 전송
+        userIds.push(userId);
 
         socket.on('disconnect', () => { // 소켓 연결 해제 될 경우
             console.log(`사용자 접속 해제! room : ${roomId} , userId : ${userId}`); 
             socket.broadcast.to(roomId).emit('user-disconnected', userId); // user-disconnected 라는 키로 userId 전송
             sendClientSize(socket, roomId);
+            userIds = userIds.filter(data => data !== userId);
         });
 
         sendClientSize(socket, roomId);
@@ -36,6 +39,10 @@ app.get('/', (req, res) => { // root 라우팅 설정
 
 app.get('/count', (req, res) => {
     res.send({ clientCount });
+})
+
+app.get('/users', (req, res) => {
+    res.send({ userIds })
 })
 
 server.listen(port, () => { // 3000번 포트로 서버 열기
