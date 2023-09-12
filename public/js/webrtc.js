@@ -18,73 +18,59 @@ let screenStream;
 navigator.mediaDevices.getUserMedia({ // 브라우저 내 사용자 카메라, 오디오 허용
     video: { facingMode: 'user' },
     audio: true
-}).then(stream => { // 허용 완료 될 경우 Promise Callback
+}).then(async stream => { // 허용 완료 될 경우 Promise Callback
     addVideoStream(myVideo, stream); // 내 비디오 추가
-    setClientCount();
+    setClientCount(await getClientCount());
 
     myPeer.on('call', call => {
         if (call.metadata && call.metadata.type === 'screen-share') {
-            call.answer();
-            call.on('stream', screenShareStream => {
-                console.log('stream access!', call);
-                addShareScreen(screenShareStream);
-            });
-            call.on('close', () => {
-                console.log('close');
-                shareScreen.innerHTML = '';
-            })
-
-            screenPeers.push(call);
-        } else {
-            call.answer(stream); // Stream 응답을 전송
-            const video = document.createElement('video');
-            video.classList.add('yourVideo');
-            video.id = call.peer;
-            call.on('stream', userVideoStream => { // peerJs 스트림 응답할 경우
-                // addVideoStream(video, userVideoStream);
-            });
-    
-            peers.push(call);
+            handleReceiveScreenShare(call);
+        } else if (call.metadata && call.metadata.type === 'webcam') {
+            handleReceiveWebcam(call, stream);
         }
     });
 
-    socket.on('user-connected', userId => { // 서버에서 user-connected 로 보낼 경우 응답
-        connectToNewUser(userId, stream);
-    });
+    socket.on('user-connected', userId => connectToNewUser(userId, stream));
 
-    fetch(`/users`)
-    .then(res => res.json())
-    .then(data => {
-        data.userIds.forEach(userId => {
-            if (userId !== myId) {  // 자신의 ID는 제외하고 연결
-                connectToNewUser(userId, stream);
-            }
-        });
-    });
+    connectToUsers(await getUsers());
 });
+
+function handleReceiveScreenShare(call) {
+    call.answer(); 
+
+    call.on('stream', screenShareStream => addScreenShare(screenShareStream));
+    call.on('close', () => disconnectScreenSharing())
+    
+    screenPeers.push(call);
+}
+
+function handleReceiveWebcam(call, stream) {
+    call.answer(stream);
+
+    const video = createDOM('video', call.peer, 'yourVideo');
+    call.on('stream', userVideoStream => addVideoStream(video, userVideoStream, call.peer));
+
+    peers.push(call);
+}
+
+socket.on('user-started-screen-share', userId => {
+    if (userId !== myId) {
+        stopScreenSharing();
+    }
+})
 
 socket.on('user-disconnected', userId => { // 서버에서 user-disconnected 로 보낼 경우 응답
     removeVideo(userId); // 비디오 DOM 삭제
-    peers.forEach(peer => {
-        if (peer.peer === userId) {
-            peer.close(); // call 연결 해제
-        }
-    })
-    peers = peers.filter(peer => peer.peer !== userId);
+    peers = disconnectPeers(peers, userId);
 });
 
 socket.on('client-count', clientCount => {
-    clientCountDOM.innerText = `현재 방 인원 : ${clientCount}`;
+    setClientCount(clientCount);
 });
 
 socket.on('user-stopped-screen-share', userId => {
-    shareScreen.innerHTML = '';
-    screenPeers.forEach(peer => {
-        if (peer.peer === userId) {
-            peer.close(); // call 연결 해제
-        }
-    })
-    screenPeers = screenPeers.filter(peer => peer.peer !== userId);
+    disconnectScreenSharing();
+    screenPeers = disconnectPeers(screenPeers, userId);
 })
 
 myPeer.on('open', id => { // Peerjs 생성 됐을 경우
@@ -95,47 +81,74 @@ myPeer.on('open', id => { // Peerjs 생성 됐을 경우
 
 shareScreenBtn.addEventListener('click', () => { // 추가
     if (screenStream) {
-        stopSharingScreen();
+        stopScreenSharing();
         return;
     }
     
-    navigator.mediaDevices.getDisplayMedia({
-        video: true
-    }).then(stream => {
-        screenStream = stream;
-        addShareScreen(stream);
-        
-        stream.getTracks()[0].onended = () => { // 화면 공유가 종료될 때 이벤트
-            stopSharingScreen();
-        };
-
-        // 기존 사용자들에게 화면 공유 스트림 전송
-        peers.forEach(peer => {
-            if (peer.peer !== myId) {
-                const call = myPeer.call(peer.peer, stream, {
-                    metadata: { type: 'screen-share' }
-                });                
-                // call.on('stream', userVideoStream => {
-                //     console.log(peer);
-                //     addShareScreen(userVideoStream);
-                // });
-                call.on('close', () => {
-                    shareScreen.innerHTML = '';
-                })
-            }
-        });
-        socket.emit('start-screen-share', ROOM_ID, myId);
-        console.log(peers);
-    }).catch(error => {
-        console.error('Failed to get display media', error);
-    });
+    startScreenSharing();
 });
 
-function stopSharingScreen() {
+function disconnectPeers(peers, id) {
+    peers.forEach(peer => {
+        if (peer.peer === id) {
+            peer.close();
+        }
+    })
+
+    return peers.filter(peer => peer.peer !== id);
+}
+
+function getMetaData(type) {
+    return {
+        metadata: { type }
+    }
+}
+
+async function startScreenSharing() {
+    try {
+        const stream = await getDisplayMediaStream();
+        handleScreenShare(stream);
+        connectScreenSharing(stream);
+        notifyServerOfScreenShare();
+    } catch (error) {
+        console.error('Error starting screen sharing:', error);
+    }
+}
+
+async function getDisplayMediaStream() {
+    return navigator.mediaDevices.getDisplayMedia({ video: true });
+}
+
+function handleScreenShare(stream) {
+    screenStream = stream;
+    addScreenShare(stream);
+
+    const track = stream.getTracks()[0];
+    track.onended = stopScreenSharing;
+}
+
+function notifyServerOfScreenShare() {
+    socket.emit('start-screen-share', ROOM_ID, myId);
+}
+
+function connectScreenSharing(stream) {
+    peers.forEach(peer => {
+        if (peer.peer !== myId) {
+            const call = myPeer.call(peer.peer, stream, getMetaData('screen-share'));
+            call.on('close', () => { disconnectScreenSharing() })
+        }
+    });
+}
+
+function stopScreenSharing() {
     screenStream.getTracks().forEach(track => track.stop());
     screenStream = null;
     shareScreen.innerHTML = '';
     socket.emit('stop-screen-share', ROOM_ID, myId);
+}
+
+function disconnectScreenSharing() {
+    shareScreen.innerHTML = '';
 }
 
 function removeVideo(userId) {
@@ -147,25 +160,32 @@ function connectToNewUser(userId, stream) {
         return;
     }   
 
-    const call = myPeer.call(userId, stream, {
-        metadata: { type: 'webcam' }
-    }); // P2P 연결되어 있는 상대방에게 스트림 전송
+    const call = myPeer.call(userId, stream, getMetaData('webcam'));
+    if (!call) {
+        return;
+    }
 
-    const video = document.createElement('video');
-    video.classList.add('yourVideo')
-    video.id = userId;
-
+    const video = createDOM('video', userId, 'yourVideo');
     call.on('stream', userVideoStream => { // stream 받았을 경우 실행
-        addVideoStream(video, userVideoStream); // video 추가
+        addVideoStream(video, userVideoStream, userId); // video 추가
     });
-    call.on('close', () => {
-        video.remove();
-    });
+    call.on('close', () => video.remove());
 
     peers.push(call);
 }
 
-function addVideoStream(video, stream) {
+function createDOM(tag, id, ...classList) {
+    const dom = document.createElement(tag);
+    dom.id = id;
+    classList.forEach(className => { dom.classList.add(className) })
+    return dom;
+}
+
+function addVideoStream(video, stream, id=null) {
+    if (id !== null && document.getElementById(id)) {
+        return;
+    }
+
     video.srcObject = stream;
     video.addEventListener('loadedmetadata', () => {
         video.play();
@@ -173,7 +193,7 @@ function addVideoStream(video, stream) {
     videoGrid.append(video);
 }
 
-function addShareScreen(stream) {
+function addScreenShare(stream) {
     const video = document.getElementById('share-screen-video');
     video.srcObject = stream;
     video.addEventListener('loadedmetadata', () => {
@@ -197,7 +217,29 @@ async function getClientCount() {
     }
 }
 
-async function setClientCount() {
-    const count = await getClientCount()
+async function setClientCount(count) {
     clientCountDOM.innerText = `현재 방 인원 : ${count}`;
+}
+
+async function getUsers() {
+    try {
+        const res = await fetch(`/users`)
+
+        if (res.status === 200) {
+            const data = await res.json();
+            return data.userIds;
+        } else {
+            return [];
+        }
+    } catch (err) {
+        return [];
+    }
+}
+
+async function connectToUsers(userIds, stream) {
+    userIds.forEach(userId => {
+        if (userId !== myId) {  // 자신의 ID는 제외하고 연결
+            connectToNewUser(userId, stream);
+        }
+    })
 }
